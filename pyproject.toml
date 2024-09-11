@@ -16,7 +16,7 @@ matplotlib = "^3.8.2"
 seaborn = "^0.13.1"
 tqdm = "^4.66.1"
 #scikit-psl = { git = "http://github.com/trr318/scikit-psl", branch = "feature/pubml" }
-scikit-psl = { git = "http://github.com/trr318/scikit-psl", branch = "feature/return-ci-probas" }
+scikit-psl = { git = "http://github.com/trr318/scikit-psl", branch = "master" }
 joblib = { git = "http://github.com/joblib/joblib.git" } #"^1.4.0"
 networkx = "^3.2.1"
 

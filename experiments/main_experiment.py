@@ -5,6 +5,7 @@ import pandas as pd
 from joblib import delayed, wrap_non_picklable_objects, Parallel
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
+import xgboost as xgb
 from sklearn.model_selection import cross_validate, ShuffleSplit
 from sklearn.metrics import (
     make_scorer,
@@ -24,8 +25,8 @@ from skpsl import ProbabilisticScoringList
 from skpsl.preprocessing.binarizer import MinEntropyBinarizer
 from skpsl.metrics import expected_entropy_loss, weighted_loss, soft_ranking_loss
 
-RESULTFOLDER = "results"
-DATAFOLDER = "data"
+RESULTFOLDER = "experiments/results"
+DATAFOLDER = "experiments/data"
 
 
 def estimator_factory(param):
@@ -44,10 +45,14 @@ def estimator_factory(param):
             pre = MinEntropyBinarizer(method=kwargs["method"])
             kwargs.pop("method")
             psl = ProbabilisticScoringList(**kwargs)
-            return make_pipeline(SimpleImputer(missing_values=-1,strategy="most_frequent"), pre, psl)
+            return make_pipeline(
+                SimpleImputer(missing_values=-1, strategy="most_frequent"), pre, psl
+            )
         case "psl":
             psl = make_pipeline(
-                SimpleImputer(missing_values=-1, strategy="most_frequent"), FunctionTransformer(), ProbabilisticScoringList(**dict(params))
+                SimpleImputer(missing_values=-1, strategy="most_frequent"),
+                FunctionTransformer(),
+                ProbabilisticScoringList(**dict(params)),
             )
             return psl
         case _:
@@ -63,6 +68,7 @@ def conservative_weighted_loss(y_true, y_prob, m=10, *, sample_weight=None):
 
 
 # 1/m - ub/m < ub
+
 
 def worker_facory():
     rh = ResultHandler(RESULTFOLDER)
@@ -94,12 +100,17 @@ def worker_facory():
     # for the in-sample calculation into account
     def sample_aware_scorer(estimator, X_train, X_test, y_train, y_test):
         if "ci" in getfullargspec(estimator.predict_proba).args:
-            dicts = [{f"train_conservative_wloss{ci}": conservative_weighted_loss(
-                y_train, estimator.predict_proba(X_train, ci=ci / 100)
-            ),
-                f"test_conservative_wloss{ci}": conservative_weighted_loss(
-                    y_test, estimator.predict_proba(X_test, ci=ci / 100)
-                )} for ci in [5, 10, 20, 50, 80, 90, 95, 99]]
+            dicts = [
+                {
+                    f"train_conservative_wloss{ci}": conservative_weighted_loss(
+                        y_train, estimator.predict_proba(X_train, ci=ci / 100)
+                    ),
+                    f"test_conservative_wloss{ci}": conservative_weighted_loss(
+                        y_test, estimator.predict_proba(X_test, ci=ci / 100)
+                    ),
+                }
+                for ci in [5, 10, 20, 50, 80, 90, 95, 99]
+            ]
             return reduce(or_, dicts, dict())
         return dict()
 
@@ -140,16 +151,16 @@ def worker_facory():
         results[0] |= sample_aware_scorer(psl, X_train, X_test, y_train, y_test)
         for k, stage in enumerate(psl):
             cur_results = (
-                    {
-                        f"train_{name}": scorer(stage, X_train, y_train)
-                        for name, scorer in scoring.items()
-                    }
-                    | {
-                        f"test_{name}": scorer(stage, X_test, y_test)
-                        for name, scorer in scoring.items()
-                    }
-                    | sample_aware_scorer(stage, X_train, X_test, y_train, y_test)
-                    | dict(stage=k)
+                {
+                    f"train_{name}": scorer(stage, X_train, y_train)
+                    for name, scorer in scoring.items()
+                }
+                | {
+                    f"test_{name}": scorer(stage, X_test, y_test)
+                    for name, scorer in scoring.items()
+                }
+                | sample_aware_scorer(stage, X_train, X_test, y_train, y_test)
+                | dict(stage=k)
             )
             results.append(cur_results)
 
@@ -157,36 +168,40 @@ def worker_facory():
                 if k == 0:
                     # add performance of stage clf in to mimic performance of logreg at stage 0 (majority classifier)
                     cur_results = (
-                            {
-                                f"train_{name}": scorer(stage, X_train, y_train)
-                                for name, scorer in scoring.items()
-                            }
-                            | {
-                                f"test_{name}": scorer(stage, X_test, y_test)
-                                for name, scorer in scoring.items()
-                            }
-                            | sample_aware_scorer(stage, X_train, X_test, y_train, y_test)
-                            | dict(stage=k)
-                            | dict(clf_variant=name)
+                        {
+                            f"train_{name}": scorer(stage, X_train, y_train)
+                            for name, scorer in scoring.items()
+                        }
+                        | {
+                            f"test_{name}": scorer(stage, X_test, y_test)
+                            for name, scorer in scoring.items()
+                        }
+                        | sample_aware_scorer(stage, X_train, X_test, y_train, y_test)
+                        | dict(stage=k)
+                        | dict(clf_variant=name)
                     )
                     results.append(cur_results)
                 else:
                     X_train_ = X_train[:, stage.features]
                     X_test_ = X_test[:, stage.features]
-                    logreg = make_pipeline(SimpleImputer(missing_values=-1, strategy="most_frequent"), LogisticRegression(max_iter=10000, penalty=penalty)).fit(
-                        X_train_, y_train)
+                    logreg = make_pipeline(
+                        SimpleImputer(missing_values=-1, strategy="most_frequent"),
+                        LogisticRegression(max_iter=10000, penalty=penalty),
+                    ).fit(X_train_, y_train)
                     cur_results = (
-                            {
-                                f"train_{name}": scorer(logreg, X_train_, y_train)
-                                for name, scorer in scoring.items()
-                            }
-                            | {
-                                f"test_{name}": scorer(logreg, X_test_, y_test)
-                                for name, scorer in scoring.items()
-                            }
-                            | sample_aware_scorer(logreg, X_train_, X_test_, y_train, y_test)
-                            | dict(stage=k)
-                            | dict(clf_variant=name)
+                        {
+                            f"train_{name}": scorer(logreg, X_train_, y_train)
+                            for name, scorer in scoring.items()
+                        }
+                        | {
+                            f"test_{name}": scorer(logreg, X_test_, y_test)
+                            for name, scorer in scoring.items()
+                        }
+                        | sample_aware_scorer(
+                            logreg, X_train_, X_test_, y_train, y_test
+                        )
+                        | dict(stage=k)
+                        | dict(clf_variant=name)
                     )
                     results.append(cur_results)
         rh.write_results(key, results)
@@ -221,7 +236,7 @@ if __name__ == "__main__":
         dict_product(
             prefix="psl",
             d=base
-              | dict(
+            | dict(
                 stage_clf_params=[
                     ("calibration_method", "isotonic"),
                     ("calibration_method", "sigmoid"),
@@ -233,7 +248,7 @@ if __name__ == "__main__":
         dict_product(
             prefix="psl_prebin",
             d=base
-              | dict(
+            | dict(
                 stage_clf_params=[
                     ("calibration_method", "isotonic"),
                     ("calibration_method", "sigmoid"),
@@ -245,7 +260,7 @@ if __name__ == "__main__":
         dict_product(
             prefix="psl_prebin",
             d=base
-              | dict(
+            | dict(
                 score_set=[
                     (-3, -2, -1),
                     (-2, -1),
@@ -259,7 +274,7 @@ if __name__ == "__main__":
         dict_product(
             prefix="psl",
             d=base
-              | dict(
+            | dict(
                 score_set=[
                     (-3, -2, -1, 1, 2, 3),
                     (-2, -1, 1, 2),
