@@ -19,6 +19,7 @@ tqdm = "^4.66.1"
 scikit-psl = { git = "http://github.com/trr318/scikit-psl", branch = "master" }
 joblib = { git = "http://github.com/joblib/joblib.git" } #"^1.4.0"
 networkx = "^3.2.1"
+optuna = "^4.0.0"
 
 
 [build-system]

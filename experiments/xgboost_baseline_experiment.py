@@ -4,7 +4,6 @@ from itertools import product, chain
 import pandas as pd
 from joblib import delayed, wrap_non_picklable_objects, Parallel
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression
 import xgboost as xgb
 from sklearn.model_selection import cross_validate, ShuffleSplit
 from sklearn.metrics import (
@@ -226,9 +225,7 @@ def dict_product(prefix, d):
 
 
 if __name__ == "__main__":
-    # datasets = ["thorax", 41945, 42900]
-    datasets = ["cali_housing_binary", "ACSIncome"]
-    datasets = ["ACSIncome"]
+    datasets = ["thorax", 41945, 42900]
     splits = 100
 
     rh = ResultHandler(RESULTFOLDER)
@@ -307,7 +304,7 @@ if __name__ == "__main__":
     worker = worker_facory()
     list(
         tqdm(
-            Parallel(n_jobs=2, return_as="generator_unordered")(
+            Parallel(n_jobs=16, return_as="generator_unordered")(
                 worker(fold, dataset, params) for fold, dataset, params in grid
             ),
             total=len(grid),
