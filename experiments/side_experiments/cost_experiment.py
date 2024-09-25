@@ -88,7 +88,8 @@ def calculate_evois(dag, loss=expected_loss, weight_by_bucket_size=False):
 
         children = dag.successors(node)
         successors = nx.single_source_shortest_path_length(dag, node)
-        largest_dist = max(successors.values())
+        # largest_dist = max(successors.values())
+        largest_dist = 1
         node_evois = {}
         for dist in range(1, largest_dist + 1):
             succs_at_dist = [k for k, v in successors.items() if int(v) == dist]
@@ -202,12 +203,22 @@ def worker(
     cwloss_non_adap = conservative_weighted_loss(y_test, y_prob_non_adaptive)
 
     if y_prob_non_adaptive.shape[1] == 3:
-        lb, _, ub = y_prob_non_adaptive.T
-    tn, fp, fn, tp = confusion_matrix(
+        lb, _, ub_non_adap = y_prob_non_adaptive.T
+    tn_non_adap, fp_non_adap, fn_non_adap, tp_non_adap = confusion_matrix(
         y_test,
-        1 - ub < m * ub,
-        sample_weight=sample_weight,
-        normalize="all",
+        1 - ub_non_adap < 10 * ub_non_adap,
+        sample_weight=None,
+        normalize=None,
+        labels=[False, True],
+    ).ravel()
+
+    if y_prob_adaptive.shape[1] == 3:
+        lb, _, ub_adap = y_prob_adaptive.T
+    tn_adap, fp_adap, fn_adap, tp_adap = confusion_matrix(
+        y_test,
+        1 - ub_adap < 10 * ub_adap,
+        sample_weight=None,
+        normalize=None,
         labels=[False, True],
     ).ravel()
 
@@ -227,8 +238,10 @@ def worker(
             voi,
             cwloss_adap,
             remaining_budget,
-            # bacc_adap,
-            # acc_adap,
+            tp_adap,
+            fp_adap,
+            fn_adap,
+            tn_adap,
         ],
         [
             "baseline",
@@ -240,8 +253,10 @@ def worker(
             voi,
             cwloss_non_adap,
             0,
-            # bacc_non_adap,
-            # acc_non_adap,
+            tp_non_adap,
+            fp_non_adap,
+            fn_non_adap,
+            tn_non_adap,
         ],
     ]
 
@@ -262,12 +277,10 @@ if __name__ == "__main__":
             "voi",
             "cwloss",
             "remaining_budget",
-            "true_negatives",
-            "false_positives",
-            "false_negatives",
-            "true_positives",
-            # "bacc_non_adap",
-            # "acc_non_adap",
+            "tp",
+            "fp",
+            "fn",
+            "tn",
         ],
     )
     df.to_csv("../results/cost_results.csv")
